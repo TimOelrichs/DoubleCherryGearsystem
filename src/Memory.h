@@ -65,6 +65,7 @@ public:
     Memory();
     ~Memory();
     void SetProcessor(Processor* pProcessor);
+    Processor* GetProcessor() { return m_pProcessor; };
     void Init();
     void Reset(bool bGameGear);
     void SetCurrentRule(MemoryRule* pRule);

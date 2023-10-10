@@ -23,6 +23,7 @@
 #include "Input.h"
 #include "Cartridge.h"
 #include "Memory.h"
+#include "Processor.h"
 
 GameGearIOPorts::GameGearIOPorts(Audio* pAudio, Video* pVideo, Input* pInput, Cartridge* pCartridge, Memory* pMemory)
 {
@@ -31,8 +32,7 @@ GameGearIOPorts::GameGearIOPorts(Audio* pAudio, Video* pVideo, Input* pInput, Ca
     m_pInput = pInput;
     m_pCartridge = pCartridge;
     m_pMemory = pMemory;
-    m_Port3F = 0;
-    m_Port3F_HC = 0;
+    Reset();
 }
 
 GameGearIOPorts::~GameGearIOPorts()
@@ -43,7 +43,13 @@ void GameGearIOPorts::Reset()
 {
     m_Port3F = 0;
     m_Port3F_HC = 0;
-    m_Port2 = 0;
+    u8 m_Port0 = 0xC0;
+    u8 m_Port1 = 0x7F;
+    u8 m_Port2 = 0xFF;
+    u8 m_Port3 = 0x00;
+    u8 m_Port4 = 0xFF;
+    u8 m_Port5 = 0x38;
+    u8 m_Port6 = 0xFF;
 }
 
 u8 GameGearIOPorts::DoInput(u8 port)
@@ -60,12 +66,15 @@ u8 GameGearIOPorts::DoInput(u8 port)
                 return port00;
             }
             case 0x01:
-                return 0x7F;
+                return m_Port1 & 0x7F;
             case 0x02:
                 return m_Port2;
             case 0x03:
+                return m_Port3;
+            case 0x04:
+                return m_Port4;
             case 0x05:
-                return 0x00;
+                return m_Port5;
             default:
                 return 0xFF;
         }
@@ -124,15 +133,53 @@ void GameGearIOPorts::DoOutput(u8 port, u8 value)
 {
     if (port < 0x07)
     {
-        if (port == 0x06)
+
+        switch (port)
         {
-            // SN76489 PSG
-            m_pAudio->WriteGGStereoRegister(value);
-        }
-        else if (port == 0x02)
+        case 0x00: m_Port0 = value; break; 
+        case 0x01: m_Port1 = value; break; 
+        case 0x02: 
         {
-            m_Port2 = value;
+            if (!(m_Port2 & 0x80)) // If NINT Gen enabled
+            {
+                if (m_Port2 & 0x40 && !(value & 0x40)) // if D6 is Input and falls
+                {
+                    m_pMemory->GetProcessor()->RequestNMI();
+                }
+
+            }
+            m_Port2 = value; break;
         }
+
+        case 0x03:
+        {
+            m_Port3 = value;   //Used to set the send data during serial communications.
+            m_Port5 &= 0xFE;
+            break;
+        }
+        case 0x04:
+        {
+            m_Port4 = value;  //The receive data is set during serial communications.
+            m_Port5 |= 0x02; 
+            m_pMemory->GetProcessor()->RequestNMI();
+            break;
+        }
+        case 0x05: 
+        {
+            m_Port5 |= value; //Serial communications mode setting 
+            SetBaudrate(value >> 6); break; 
+            if (value & 0x02) // theres received data
+            {
+                m_pMemory->GetProcessor()->RequestNMI();
+                m_Port5 &= 0xFD; 
+
+            }
+            break;
+
+        }
+        case 0x06: m_pAudio->WriteGGStereoRegister(value); break; // SN76489 PSG
+        }
+
     }
     else if (port < 0x40)
     {

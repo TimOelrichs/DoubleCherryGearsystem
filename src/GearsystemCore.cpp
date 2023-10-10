@@ -102,6 +102,8 @@ void GearsystemCore::Init(GS_Color_Format pixelFormat)
     m_pCartridge->Init();
 
     InitMemoryRules();
+
+    m_pProcessor->SetIOPOrts(m_pGameGearIOPorts);
 }
 
 bool GearsystemCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSampleCount, bool step, bool stopOnBreakpoints)
@@ -111,7 +113,6 @@ bool GearsystemCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
     if (!m_bPaused && m_pCartridge->IsReady())
     {
         bool vblank = false;
-        int totalClocks = 0;
         while (!vblank)
         {
 #ifdef PERFORMANCE
@@ -133,9 +134,12 @@ bool GearsystemCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
                     breakpoint = true;
             }
 #endif
-
+        
             if (totalClocks > 702240)
+            {
                 vblank = true;
+                totalClocks = 0;
+            }
         }
 
         m_pAudio->EndFrame(pSampleBuffer, pSampleCount);
@@ -143,6 +147,74 @@ bool GearsystemCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
     }
 
     return breakpoint;
+}
+
+
+bool GearsystemCore::RunToNextSerial(u8* pFrameBuffer, s16* pSampleBuffer, int* pSampleCount, bool step, bool stopOnBreakpoints)
+{
+    bool breakpoint = false;
+
+    if (!m_bPaused && m_pCartridge->IsReady())
+    {
+        bool serial_done = false;
+
+        while (!serial_done)
+        {
+#ifdef PERFORMANCE
+            unsigned int clockCycles = m_pProcessor->RunFor(75);
+#else
+            unsigned int clockCycles = m_pProcessor->RunFor(1);
+#endif
+            m_pVideo->Tick(clockCycles);
+            //m_pAudio->Tick(clockCycles);
+            m_pInput->Tick(clockCycles);
+
+            totalClocks += clockCycles;
+
+#ifndef GEARSYSTEM_DISABLE_DISASSEMBLER
+            if ((step || (stopOnBreakpoints && m_pProcessor->BreakpointHit())))
+            {
+               // serial_done = true;
+                if (m_pProcessor->BreakpointHit())
+                    breakpoint = true;
+            }
+#endif
+            
+            if (totalClocks > 702240)
+            {
+                seri_occer = seri_occer - totalClocks;
+                //totalClocks = 0;
+                //m_pAudio->EndFrame(pSampleBuffer, pSampleCount);
+                RenderFrameBuffer(pFrameBuffer);
+                return false; 
+            }
+
+            if (totalClocks > seri_occer)
+            {
+              
+                //receive data
+                //u8 ret = m_GearToGearTarget->m_pGameGearIOPorts->DoInput(0x05);
+                //if (ret & 0x01)  serial_done = true; // no data ready
+
+                //m_GearToGearTarget->m_pGameGearIOPorts->DoOutput(0x05, ret | 0x02); 
+
+                u8 ret = m_GearToGearTarget->m_pGameGearIOPorts->DoInput(0x03); // get data from target
+                m_pGameGearIOPorts->DoOutput(0x04, ret); // send received data
+
+                u8 current_port5_state = m_GearToGearTarget->GetProcessor()->GetIOPOrts()->DoInput(0x05);
+                m_pGameGearIOPorts->DoOutput(0x05, current_port5_state | 0x02); // set received flag
+
+                //seri_occer = totalClocks + (702240 / (this->m_pGameGearIOPorts->GetBaudrate() / 60)) ;
+                seri_occer = totalClocks + 8778;
+                serial_done = true;
+
+            }
+            
+
+        }
+    }
+
+   return breakpoint;
 }
 
 bool GearsystemCore::LoadROM(const char* szFilePath, Cartridge::ForceConfiguration* config)

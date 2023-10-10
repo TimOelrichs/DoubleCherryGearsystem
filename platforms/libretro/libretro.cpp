@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <math.h>
+#include <vector>
 
 #include <stdio.h>
 #include "libretro.h"
@@ -40,8 +41,8 @@ static retro_log_printf_t log_cb;
 static char retro_system_directory[4096];
 static char retro_game_path[4096];
 
-static s16 audio_buf[GS_AUDIO_BUFFER_SIZE];
-static int audio_sample_count = 0;
+static s16 audio_buf[2][GS_AUDIO_BUFFER_SIZE];
+static int audio_sample_count[] = { 0,0 };
 static int current_screen_width = 0;
 static int current_screen_height = 0;
 static bool allow_up_down = false;
@@ -49,8 +50,8 @@ static bool bootrom_sms = false;
 static bool bootrom_gg = false;
 static bool libretro_supports_bitmasks;
 
-static GearsystemCore* core;
-static u8* frame_buffer;
+static GearsystemCore* cores[2];
+static u8* frame_buffers[2];
 static Cartridge::ForceConfiguration config;
 static GearsystemCore::GlassesConfig glasses_config;
 
@@ -88,17 +89,23 @@ void retro_init(void)
         snprintf(retro_system_directory, sizeof(retro_system_directory), "%s", ".");
     }
 
-    core = new GearsystemCore();
+    cores[0] = new GearsystemCore();
+    cores[1] = new GearsystemCore();
 
 #ifdef PS2
     core->Init(GS_PIXEL_BGR555);
 #else
-    core->Init(GS_PIXEL_RGB565);
+    cores[0]->Init(GS_PIXEL_RGB565);
+    cores[1]->Init(GS_PIXEL_RGB565);
+    cores[0]->SetGearToGearTarget(cores[1]);
+    cores[1]->SetGearToGearTarget(cores[0]);
+
 #endif
 
-    frame_buffer = new u8[GS_RESOLUTION_MAX_WIDTH * GS_RESOLUTION_MAX_HEIGHT * 2];
+    frame_buffers[0] = new u8[GS_RESOLUTION_MAX_WIDTH * GS_RESOLUTION_MAX_HEIGHT * 2];
+    frame_buffers[1] = new u8[GS_RESOLUTION_MAX_WIDTH * GS_RESOLUTION_MAX_HEIGHT * 2];
 
-    audio_sample_count = 0;
+    audio_sample_count[0] = 0;
 
     config.type = Cartridge::CartridgeNotSupported;
     config.zone = Cartridge::CartridgeUnknownZone;
@@ -112,8 +119,8 @@ void retro_init(void)
 
 void retro_deinit(void)
 {
-    SafeDeleteArray(frame_buffer);
-    SafeDelete(core);
+    SafeDeleteArray(frame_buffers[0]);
+    SafeDelete(cores[0]);
 }
 
 unsigned retro_api_version(void)
@@ -173,16 +180,17 @@ static retro_input_state_t input_state_cb;
 void retro_get_system_av_info(struct retro_system_av_info *info)
 {
     GS_RuntimeInfo runtime_info;
-    core->GetRuntimeInfo(runtime_info);
+    cores[0]->GetRuntimeInfo(runtime_info);
 
     current_screen_width = runtime_info.screen_width;
-    current_screen_height = runtime_info.screen_height;
+    current_screen_height = runtime_info.screen_height*2;
 
     info->geometry.base_width   = runtime_info.screen_width;
-    info->geometry.base_height  = runtime_info.screen_height;
+    info->geometry.base_height  = runtime_info.screen_height*2;
     info->geometry.max_width    = runtime_info.screen_width;
-    info->geometry.max_height   = runtime_info.screen_height;
+    info->geometry.max_height   = runtime_info.screen_height*2;
     info->geometry.aspect_ratio = 0.0f;
+    //info->geometry.aspect_ratio = (float)info->geometry.max_height / (float)info->geometry.max_width;
     info->timing.fps            = runtime_info.region == Region_NTSC ? 60.0 : 50.0;
     info->timing.sample_rate    = 44100.0;
 }
@@ -248,10 +256,17 @@ static void load_bootroms(void)
     sprintf(bootrom_sms_path, "%s%cbios.sms", retro_system_directory, slash);
     sprintf(bootrom_gg_path, "%s%cbios.gg", retro_system_directory, slash);
 
-    core->GetMemory()->LoadBootromSMS(bootrom_sms_path);
-    core->GetMemory()->LoadBootromGG(bootrom_gg_path);
-    core->GetMemory()->EnableBootromSMS(bootrom_sms);
-    core->GetMemory()->EnableBootromGG(bootrom_gg);
+    cores[0]->GetMemory()->LoadBootromSMS(bootrom_sms_path);
+    cores[0]->GetMemory()->LoadBootromGG(bootrom_gg_path);
+    cores[0]->GetMemory()->EnableBootromSMS(bootrom_sms);
+    cores[0]->GetMemory()->EnableBootromGG(bootrom_gg);
+
+    
+    cores[1]->GetMemory()->LoadBootromSMS(bootrom_sms_path);
+    cores[1]->GetMemory()->LoadBootromGG(bootrom_gg_path);
+    cores[1]->GetMemory()->EnableBootromSMS(bootrom_sms);
+    cores[1]->GetMemory()->EnableBootromGG(bootrom_gg);
+    
 }
 
 static void update_input(void)
@@ -274,44 +289,44 @@ static void update_input(void)
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_UP))
         {
             if (allow_up_down || !(ib & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)))
-                core->KeyPressed(static_cast<GS_Joypads>(player), Key_Up);
+                cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_Up);
         }
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_Up);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_Up);
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN))
         {
             if (allow_up_down || !(ib & (1 << RETRO_DEVICE_ID_JOYPAD_UP)))
-                core->KeyPressed(static_cast<GS_Joypads>(player), Key_Down);
+                cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_Down);
         }
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_Down);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_Down);
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT))
         {
             if (allow_up_down || !(ib & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT)))
-                core->KeyPressed(static_cast<GS_Joypads>(player), Key_Left);
+                cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_Left);
         }
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_Left);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_Left);
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT))
         {
             if (allow_up_down || !(ib & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT)))
-                core->KeyPressed(static_cast<GS_Joypads>(player), Key_Right);
+                cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_Right);
         }
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_Right);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_Right);
 
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_B))
-            core->KeyPressed(static_cast<GS_Joypads>(player), Key_1);
+            cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_1);
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_1);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_1);
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_A))
-            core->KeyPressed(static_cast<GS_Joypads>(player), Key_2);
+            cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_2);
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_2);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_2);
         if (ib & (1 << RETRO_DEVICE_ID_JOYPAD_START))
-            core->KeyPressed(static_cast<GS_Joypads>(player), Key_Start);
+            cores[player]->KeyPressed(static_cast<GS_Joypads>(0), Key_Start);
         else
-            core->KeyReleased(static_cast<GS_Joypads>(player), Key_Start);
+            cores[player]->KeyReleased(static_cast<GS_Joypads>(0), Key_Start);
     }
 }
 
@@ -444,7 +459,7 @@ static void check_variables(void)
         else
             glasses_config = GearsystemCore::GlassesBothEyes;
 
-        core->SetGlassesConfig(glasses_config);
+        cores[0]->SetGlassesConfig(glasses_config);
     }
 }
 
@@ -458,11 +473,46 @@ void retro_run(void)
 
     update_input();
 
-    core->RunToVBlank(frame_buffer, audio_buf, &audio_sample_count);
+    
+    cores[0]->RunToVBlank(frame_buffers[0], audio_buf[0], &audio_sample_count[0]);
+
+    if (audio_sample_count[0] > 0)
+        audio_batch_cb(audio_buf[0], audio_sample_count[0] / 2);
+
+    audio_sample_count[0] = 0;
+
+    cores[1]->RunToVBlank(frame_buffers[1], audio_buf[1], &audio_sample_count[1]);
+    
 
     GS_RuntimeInfo runtime_info;
-    core->GetRuntimeInfo(runtime_info);
+    cores[0]->GetRuntimeInfo(runtime_info);
 
+    /*
+    //serial
+    while (cores[1]->totalClocks < 702240)
+    {
+        cores[0]->RunToNextSerial(frame_buffers[0], audio_buf[0], &audio_sample_count[0]);
+        cores[1]->RunToNextSerial(frame_buffers[1], audio_buf[1], &audio_sample_count[1]);
+    }
+
+    cores[0]->totalClocks = 0;
+    cores[1]->totalClocks = 0;
+
+    /*
+   // cores[0]->GetAudio()->EndFrame(audio_buf[0], &audio_sample_count[0]);
+    cores[0]->RenderFrameBuffer(frame_buffers[0]);
+    if (cores[0]->seri_occer > 8778) cores[0]->seri_occer = 8778;
+
+   
+  //  cores[1]->GetAudio()->EndFrame(audio_buf[1], &audio_sample_count[1]);
+    cores[1]->RenderFrameBuffer(frame_buffers[1]);
+    if (cores[1]->seri_occer > 8778) cores[1]->seri_occer = 8778;
+    */
+    
+    
+
+
+    /*
     if ((runtime_info.screen_width != current_screen_width) || (runtime_info.screen_height != current_screen_height))
     {
         current_screen_width = runtime_info.screen_width;
@@ -476,21 +526,51 @@ void retro_run(void)
         info.geometry.aspect_ratio = 0.0;
 
         environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &info.geometry);
+    }*/
+
+ 
+
+    //vertical layout
+    
+    //static u8 joined_buf[GS_RESOLUTION_MAX_WIDTH * GS_RESOLUTION_GG_HEIGHT * 2 * 2 ];
+    static u8 joined_buf[GS_RESOLUTION_GG_WIDTH * GS_RESOLUTION_GG_HEIGHT * 2 * 2 ];
+    const int half = sizeof(joined_buf) / 2;
+    
+    
+    memcpy(joined_buf, frame_buffers[0], half);
+    memcpy(joined_buf + half, frame_buffers[1], half);
+ 
+    //video_cb((uint8_t*)frame_buffers[1], runtime_info.screen_width, runtime_info.screen_height, runtime_info.screen_width * sizeof(u8) * 2);
+    // video_cb((uint8_t*)joined_buf, runtime_info.screen_width, runtime_info.screen_height*2, runtime_info.screen_width * sizeof(u8)*2);
+    video_cb((uint8_t*)joined_buf, runtime_info.screen_width, GS_RESOLUTION_GG_HEIGHT * 2, runtime_info.screen_width * sizeof(u8) * 2);
+    
+
+    //horizontal layout  not working yet
+    /*
+    int height = GS_RESOLUTION_GG_HEIGHT;
+    int width = GS_RESOLUTION_GG_WIDTH;
+    const int line = GS_RESOLUTION_GG_WIDTH * 2;
+
+    for (int row = 0; row < height; ++row)
+    {
+        memcpy(joined_buf + (row * 2 * line), frame_buffers[0] + width * row, width);
+        memcpy(joined_buf + (row * 2 * line + 1), frame_buffers[1] + width * row, width);
+  
     }
 
-    video_cb((uint8_t*)frame_buffer, runtime_info.screen_width, runtime_info.screen_height, runtime_info.screen_width * sizeof(u8) * 2);
+    video_cb((uint8_t*)joined_buf, current_screen_width, current_screen_height, current_screen_width * sizeof(u8) * 2);
+    */
 
-    if (audio_sample_count > 0)
-        audio_batch_cb(audio_buf, audio_sample_count / 2);
 
-    audio_sample_count = 0;
+   
+    
 }
 
 void retro_reset(void)
 {
     check_variables();
     load_bootroms();
-    core->ResetROMPreservingRAM(&config);
+    cores[0]->ResetROMPreservingRAM(&config);
 }
 
 bool retro_load_game(const struct retro_game_info *info)
@@ -498,7 +578,12 @@ bool retro_load_game(const struct retro_game_info *info)
     check_variables();
     load_bootroms();
 
-    if (!core->LoadROMFromBuffer(reinterpret_cast<const u8*>(info->data), info->size, &config))
+    if (!cores[0]->LoadROMFromBuffer(reinterpret_cast<const u8*>(info->data), info->size, &config))
+    {
+        log_cb(RETRO_LOG_ERROR, "Invalid or corrupted ROM.\n");
+        return false;
+    }
+    if (!cores[1]->LoadROMFromBuffer(reinterpret_cast<const u8*>(info->data), info->size, &config))
     {
         log_cb(RETRO_LOG_ERROR, "Invalid or corrupted ROM.\n");
         return false;
@@ -516,6 +601,12 @@ bool retro_load_game(const struct retro_game_info *info)
     bool achievements = true;
     environ_cb(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &achievements);
 
+    ////set game gear serial communication on 
+
+    cores[0]->GetProcessor()->GetIOPOrts()->DoOutput(0x05, 0x38);   
+    cores[1]->GetProcessor()->GetIOPOrts()->DoOutput(0x05, 0x38);
+
+
     return true;
 }
 
@@ -525,7 +616,7 @@ void retro_unload_game(void)
 
 unsigned retro_get_region(void)
 {
-    return core->GetCartridge()->IsPAL() ? RETRO_REGION_PAL : RETRO_REGION_NTSC;
+    return cores[0]->GetCartridge()->IsPAL() ? RETRO_REGION_PAL : RETRO_REGION_NTSC;
 }
 
 bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t num)
@@ -536,18 +627,18 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, 
 size_t retro_serialize_size(void)
 {
     size_t size = 0;
-    core->SaveState(NULL, size);
+    cores[0]->SaveState(NULL, size);
     return size;
 }
 
 bool retro_serialize(void *data, size_t size)
 {
-    return core->SaveState(reinterpret_cast<u8*>(data), size);
+    return cores[0]->SaveState(reinterpret_cast<u8*>(data), size);
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-    return core->LoadState(reinterpret_cast<const u8*>(data), size);
+    return cores[0]->LoadState(reinterpret_cast<const u8*>(data), size);
 }
 
 void *retro_get_memory_data(unsigned id)
@@ -555,9 +646,9 @@ void *retro_get_memory_data(unsigned id)
     switch (id)
     {
         case RETRO_MEMORY_SAVE_RAM:
-            return core->GetMemory()->GetCurrentRule()->GetRamBanks();
+            return cores[0]->GetMemory()->GetCurrentRule()->GetRamBanks();
         case RETRO_MEMORY_SYSTEM_RAM:
-            return core->GetMemory()->GetMemoryMap() + 0xC000;
+            return cores[0]->GetMemory()->GetMemoryMap() + 0xC000;
     }
 
     return NULL;
@@ -568,7 +659,7 @@ size_t retro_get_memory_size(unsigned id)
     switch (id)
     {
         case RETRO_MEMORY_SAVE_RAM:
-            return core->GetMemory()->GetCurrentRule()->GetRamSize();
+            return cores[0]->GetMemory()->GetCurrentRule()->GetRamSize();
         case RETRO_MEMORY_SYSTEM_RAM:
             return 0x2000;
     }
@@ -578,10 +669,10 @@ size_t retro_get_memory_size(unsigned id)
 
 void retro_cheat_reset(void)
 {
-    core->ClearCheats();
+    cores[0]->ClearCheats();
 }
 
 void retro_cheat_set(unsigned index, bool enabled, const char *code)
 {
-    core->SetCheat(code);
+    cores[0]->SetCheat(code);
 }

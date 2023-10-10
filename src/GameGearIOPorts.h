@@ -38,6 +38,8 @@ public:
     virtual void DoOutput(u8 port, u8 value);
     virtual void SaveState(std::ostream& stream);
     virtual void LoadState(std::istream& stream);
+    void SetBaudrate(u8 selection) { m_current_serial_baudrate = m_serial_baurate_options[selection]; };
+    int GetBaudrate() { return m_current_serial_baudrate; };
 private:
     Audio* m_pAudio;
     Video* m_pVideo;
@@ -46,7 +48,9 @@ private:
     Cartridge* m_pCartridge;
     u8 m_Port3F;
     u8 m_Port3F_HC;
-    u8 m_Port2;
+
+    int m_serial_baurate_options[4] = { 4800,2400,1200,300 };
+    int m_current_serial_baudrate = 4800;
 };
 
 #endif	/* GAMEGEARIOPORTS_H */

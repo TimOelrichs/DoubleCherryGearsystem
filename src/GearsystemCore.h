@@ -55,6 +55,7 @@ public:
     ~GearsystemCore();
     void Init(GS_Color_Format pixelFormat = GS_PIXEL_RGB888);
     bool RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSampleCount, bool step = false, bool stopOnBreakpoints = false);
+    bool RunToNextSerial(u8* pFrameBuffer, s16* pSampleBuffer, int* pSampleCount, bool step = false, bool stopOnBreakpoints = false);
     bool LoadROM(const char* szFilePath, Cartridge::ForceConfiguration* config = NULL);
     bool LoadROMFromBuffer(const u8* buffer, int size, Cartridge::ForceConfiguration* config = NULL);
     void SaveMemoryDump();
@@ -90,12 +91,18 @@ public:
     Audio* GetAudio();
     Video* GetVideo();
     void SetGlassesConfig(GlassesConfig config);
+    void RenderFrameBuffer(u8* finalFrameBuffer);
+
+    void SetGearToGearTarget(GearsystemCore* target) { m_GearToGearTarget = target; };
+
+    int seri_occer = 8778;
+    int totalClocks = 0;
 
 private:
     void InitMemoryRules();
     bool AddMemoryRules();
     void Reset();
-    void RenderFrameBuffer(u8* finalFrameBuffer);
+   
 
 private:
     Memory* m_pMemory;
@@ -118,6 +125,9 @@ private:
     RamChangedCallback m_pRamChangedCallback;
     GS_Color_Format m_pixelFormat;
     GlassesConfig m_GlassesConfig;
+
+    GearsystemCore* m_GearToGearTarget; 
+   
 };
 
 #endif	/* CORE_H */

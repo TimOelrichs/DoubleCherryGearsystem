@@ -26,6 +26,7 @@
 
 Processor::Processor(Memory* pMemory)
 {
+
     m_pMemory = pMemory;
     m_pMemory->SetProcessor(this);
     InitPointer(m_pIOPorts);
@@ -135,8 +136,10 @@ unsigned int Processor::RunFor(u8 tstates)
         {
             if (m_bNMIRequested)
             {
+                m_isFirstNINT = false;
                 LeaveHalt();
                 m_bNMIRequested = false;
+                m_bIFF2 = m_bIFF1;
                 m_bIFF1 = false;
                 StackPush(&PC);
                 PC.SetValue(0x0066);
@@ -144,6 +147,7 @@ unsigned int Processor::RunFor(u8 tstates)
                 IncreaseR();
                 WZ.SetValue(PC.GetValue());
                 DisassembleNextOpcode();
+                if (m_firstNINTDone)  this->GetIOPOrts()->DoOutput(0x02, 0x00);
                 return m_iTStates;
             }
             else if (m_bIFF1 && m_bINTRequested && !m_bAfterEI)
@@ -166,6 +170,13 @@ unsigned int Processor::RunFor(u8 tstates)
 
         ExecuteOPCode();
         DisassembleNextOpcode();
+
+        if (!m_isFirstNINT && !m_firstNINTDone)
+        {
+            if (m_firstNINTDone)  this->GetIOPOrts()->DoOutput(0x02, 0x01);
+            m_firstNINTDone = true;
+
+        }
 
         executed += m_iTStates;
     }

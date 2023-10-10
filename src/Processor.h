@@ -113,6 +113,9 @@ private:
     bool m_bBreakpointHit;
     bool m_bRequestMemBreakpoint;
 
+    bool m_isFirstNINT = true; 
+    bool m_firstNINTDone = false; 
+
     struct ProActionReplayCode
     {
         u16 address;

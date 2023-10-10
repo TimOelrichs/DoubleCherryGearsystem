@@ -22,8 +22,11 @@
 
 #include "definitions.h"
 
+class Processor;
+
 class IOPorts
 {
+
 public:
     IOPorts() { };
     virtual ~IOPorts() { };
@@ -32,6 +35,15 @@ public:
     virtual void DoOutput(u8 port, u8 value) = 0;
     virtual void SaveState(std::ostream& stream) = 0;
     virtual void LoadState(std::istream& stream) = 0;
+
+    u8 m_Port0;
+    u8 m_Port1;
+    u8 m_Port2;
+    u8 m_Port3;
+    u8 m_Port4;
+    u8 m_Port5;
+    u8 m_Port6;
+
 };
 
 #endif	/* IOPORTS_H */
